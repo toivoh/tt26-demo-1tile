@@ -38,6 +38,7 @@ module vga_skeleton #( `propagated_parameter_definitions, `derived_parameter_def
 	wire new_line, x_active_start, y_hit;
 	//raster_scan_c rs(
 	raster_scan #(
+		.USE_DOUBLE_X(1),
 `ifdef USE_LINE_BUFFER
 		.USE_LBUF(1)
 `else

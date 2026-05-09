@@ -82,11 +82,24 @@ module music_player_wrapper #(
 	logic [OUT_ACC_BITS-1:0] out_acc_initial;
 	always_comb begin
 		out_acc_initial = 'X;
+/*
 		case (speedup[1:0]) // TODO: use speedup[2] too?
 			0: out_acc_initial = -400;
 			1: out_acc_initial = -376;
 			2: out_acc_initial = -352;
 			3: out_acc_initial = -328;
+			default: out_acc_initial = 'X;
+		endcase
+*/
+		case (speedup[1:0]) // TODO: use speedup[2] too?
+			0: out_acc_initial = -400;
+			1: out_acc_initial = -376;
+			2: out_acc_initial = -352;
+			3: out_acc_initial = -328;
+			4: out_acc_initial = -360;
+			5: out_acc_initial = -336;
+			6: out_acc_initial = -312;
+			7: out_acc_initial = -288;
 			default: out_acc_initial = 'X;
 		endcase
 		out_acc_initial = out_acc_initial << (OUT_ACC_BITS - 1 - PWM_BITS);

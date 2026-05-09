@@ -62,6 +62,7 @@ scale:
 module multiplier_lookup (
 		input wire [2:0] note7,
 		input wire [2:0] scale,
+		input wire nonharmonic,
 		output logic [9:0] multiplier,
 		output logic delta_oct
 	);
@@ -72,7 +73,7 @@ module multiplier_lookup (
 	always_comb begin
 		sharp = 'X;
 		case (note7)
-			0: sharp = (scale == 4 || scale == 7);
+			0: sharp = (((scale == 4 && !nonharmonic) || scale == 7));
 			1: sharp = 1;
 			2: sharp = 1;
 			3: sharp = scale[1];
@@ -217,7 +218,7 @@ module melody_rom #(parameter OCT0 = 0) (
 		endcase
 
 		if (mode_34) case (pattern_index0)
-			10: note_stop |= 1;
+			10: begin; note_stop |= 1; note_stop_slow |= (pattern == 1 || pattern == 2); end
 			16, 34: note_start |= 1;
 			32: begin; note_start |= 1; note_stop_slow |= 1; end // TODO: support note_stop_slow and note_start at the same time
 			//42: begin; note_stop |= !pattern[0]; note_stop_slow |= pattern[0]; end
@@ -294,9 +295,10 @@ module melody_rom #(parameter OCT0 = 0) (
 
 		case (pattern_index0)
 			0, 14, 32, 48: root_note_start = 1;
-			12, 30, 30, 62: root_note_stop = 1;
+			12, 30, 46, 62: root_note_stop = 1;
 		endcase
 		if (mode_34 && pattern_index0[3:0] == 10) root_note_stop = 1;
+		if (mode_34 && pattern_index0[3:0] == 0) root_note_start = 1;
 	end
 	assign root_note_out = root_note;
 endmodule : melody_rom
@@ -307,7 +309,8 @@ module arpy(
 		input wire [2:0] root_note,
 		input wire sus4,
 
-		output logic [2:0] note
+		output logic [2:0] note,
+		output logic stop_slow
 	);
 
 	logic [2:0] note0, note1a, note2a, note1b, note2b;
@@ -346,6 +349,7 @@ module arpy(
 			7: note = note2b;
 			default: note = 'X;
 		endcase // t_in
+		stop_slow = (t_in == 3) || (t_in == 5);
 	end
 
 endmodule
@@ -394,7 +398,15 @@ module music_player #(
 
 		input wire [OUT_ACC_BITS-1:0] out_acc_initial,
 
-		output wire [OUT_ACC_BITS-1:0] out_acc
+		output wire [OUT_ACC_BITS-1:0] out_acc,
+
+		output wire [T_INT_BITS-1:0] t34_int_out,
+		output int instrument,
+		output wire note_on_out,
+		output wire [9:0] multiplier_out,
+		output wire [OCT_BITS-1:0] oct_out,
+		output wire [1:0] gain_shr_out,
+		output wire [ACC_BITS-1:0] vol_out
 	);
 
 	localparam NSHIFT_BITS = 3;
@@ -424,28 +436,34 @@ module music_player #(
 
 	wire final_measure = (pattern == 3 && measure == 3);
 
+	wire t_int0_ge_54 = (t_int0[5:4] == '1) && (t[3] || (t[2:1] == '1));
+
 
 	logic en_34;
 	logic bass_on, chords_on, melody_on, echo_on, arp_on;
 	logic [2:0] scale;
+	logic nonharmonic;
 	logic arp_high, arp_stop_slow;
 	logic keys_en, organ_chords_en, melody_saw_en;
 	logic lower_end;
-	logic force_pattern3;
+	logic force_pattern3, force_stay_at_end;
 	logic chords_snh_en, chords_loud, chords_stutter_en;
 	logic pulse_chords;
 	logic time_echo_on;
+	logic bass_soft;
 	always_comb begin
 		en_34 = 0; melody_on = 0; echo_on = 0; bass_on = 0; chords_on = 0; arp_on = 0;
 		scale = 0;
+		nonharmonic = 0;
 		arp_stop_slow = 0; arp_high = 0;
 		keys_en = 0; melody_saw_en = 0;
 		organ_chords_en = 0;
 		chords_stutter_en = 0;
 		lower_end = 0;
-		force_pattern3 = 0;
+		force_pattern3 = 0; force_stay_at_end = 0;
 		chords_snh_en = 0;
 		chords_loud = 0;
+		bass_soft = 0;
 
 		//en_34 = 0; bass_on = 1; melody_on = 1; echo_on = 1; chords_on = 1; arp_on = 1;
 		//en_34 = 1; melody_on = 1; echo_on = 1; bass_on = 0; chords_on = 0; arp_on = 0;
@@ -467,6 +485,8 @@ module music_player #(
 					lower_end = 1;
 					chords_on = 1;
 					force_pattern3 = 1;
+
+					//if (pattern[0] != t_int0_ge_54) force_stay_at_end = 1;
 				end
 
 				//if (!melody_voice) en_34 = 0; // !!!
@@ -519,7 +539,7 @@ module music_player #(
 				if (part[2]) begin
 					bass_on = pattern[1];
 					chords_on = 1;
-					chords_loud = 1;
+					//chords_loud = 1;
 					arp_on = (pattern == 3);
 					chords_snh_en = 1;
 					if (final_measure) begin
@@ -535,7 +555,7 @@ module music_player #(
 					organ_chords_en = (pattern == 0);
 					arp_on = (pattern == 3);
 					//en_34 = !measure[0];
-					en_34 = 0;
+					//en_34 = 0;
 					//en_34 = !melody_voice;
 					if (measure == 3) begin
 						bass_on = 1;
@@ -561,8 +581,11 @@ module music_player #(
 			3: begin
 				// 4/4 keys, rising scale
 				scale = {1'b1, pattern};
+				nonharmonic = 1;
 				melody_on = 1; echo_on = 1; bass_on = 1; chords_on = 1; arp_on = 0;
 				keys_en = 1;
+				bass_soft = 1;
+				//chords_stutter_en = 1;
 
 				if (final_measure && !melody_voice) scale = 0;
 			end
@@ -628,10 +651,21 @@ module music_player #(
 	logic [T_BITS_L34-1:0] t_l_shr2;
 	always_comb begin
 		t_l_shr2 = t_echo[T_BITS_L34-1:0] >> 2;
-		t_l_shr2[T_L34_SKIP_BITS-1:0] = '0; // mask out some bits that shouldn't be needed
+		//t_l_shr2[T_L34_SKIP_BITS-1:0] = '0; // mask out some bits that shouldn't be needed
 	end
 
-	wire [T_BITS_L34-1:0] t_l34 = t_echo[T_BITS_L34-1:0] - (en_34 ? t_l_shr2 : '0);
+	//wire [T_BITS_L34-1:0] t_l34 = t_echo[T_BITS_L34-1:0] - (en_34 ? t_l_shr2 : '0);
+	logic [T_BITS_L34-1:0] t_l34;
+	logic t_34_overflow;
+	always_comb begin
+		t_34_overflow = 0;
+		t_l34 = t_echo[T_BITS_L34-1:0] - (en_34 ? t_l_shr2 : '0);
+		if (en_34 && t_l34[T_BITS_L34-1 -:2] == '1) begin
+			t_34_overflow = 1;
+			t_l34[T_BITS_L34-1 -:4] = 11;
+		end
+	end
+
 	wire [T_BITS-1:0] t_34 = {t_echo[T_BITS-1:T_BITS_L34], t_l34};
 
 
@@ -650,8 +684,15 @@ module music_player #(
 //	wire [T_INT_BITS+1-1:0] t_offset = ((voice>>2) == 1) ? -4 : 0;
 //	wire [T_INT_BITS+1-1:0] t_offset = ((voice>>2) == 1) ? -2 : 0;
 
-	wire [7:0] melody_t = t_34[T_INT_BITS+T_FRAC_BITS-1 -: T_INT_BITS] | (force_pattern3 ? 64*3 : '0);
+//	wire [7:0] melody_t = t_34[T_INT_BITS+T_FRAC_BITS-1 -: T_INT_BITS] | (force_pattern3 ? 64*3 : '0);
 //	wire [7:0] melody_t = t_34[T_INT_BITS+T_FRAC_BITS-1 -: T_INT_BITS] & 63;
+
+	logic [7:0] melody_t;
+	always_comb begin
+		melody_t = t_34[T_INT_BITS+T_FRAC_BITS-1 -: T_INT_BITS];
+		if (force_pattern3) melody_t[7:6] = 1;
+		if (force_stay_at_end) melody_t[5:0] = 52;
+	end
 
 //	wire [7:0] melody_t_offset = melody_t + t_offset; // TODO: don't need to offset between patterns
 
@@ -682,7 +723,8 @@ module music_player #(
 		bass_note_stop_slow = 0;
 
 		case (tbass_int[4:0] & ~1)
-			0, 4, 8, 10, 14, 20, 24: begin; bass_note_on = 1; end
+			0, 4, 8, 14, 20, 24: begin; bass_note_on = 1; end
+			//10: begin; bass_note_on = 1; end
 			2, 12, 16: begin; bass_note_on = 1; bass_note_stop_slow = 1; end
 			6, 18: begin; bass_note_on = 1; bass_delta = 4; end
 			22: begin; bass_note_on = 1; bass_delta = 2; end
@@ -699,6 +741,14 @@ module music_player #(
 
 	wire [T_FRAC_BITS+1-1:0] t_frac_i1 = t_34[T_FRAC_BITS+1-1:0];
 	wire [T_FRAC_BITS+1-1:0] t_frac_i1_inv = ~t_frac_i1;
+
+
+	wire [2:0] arpy_note;
+	wire arpy_stop_slow;
+	arpy arpy_inst(
+		.t_in(t_int[3:1]), .root_note(root_note), .sus4(sus4),
+		.note(arpy_note), .stop_slow(arpy_stop_slow)
+	);
 
 
 	logic voice_on;
@@ -761,6 +811,8 @@ module music_player #(
 
 		nshift_keys_en = 0;
 
+		instrument = -1;
+
 //		case (voice[4:2])
 		case (voice_case[4:2])
 			// melody + echo
@@ -768,6 +820,7 @@ module music_player #(
 				voice_on = voice[2] ? echo_on : melody_on;
 				if (!keys_en) begin
 					// Organ
+					instrument = 0;
 					nshift = 2;
 					delta_mul = voice[1:0];
 					delta_oct = voice[0];
@@ -788,6 +841,7 @@ module music_player #(
 						nshift = 4;
 					end
 				end else begin
+					instrument = 1;
 					// Keys
 					pwm_offs = -293;
 					nshift_keys_en = 1;
@@ -796,8 +850,8 @@ module music_player #(
 					delta_oct = 0;
 					//delta_oct = voice[1];
 					//gain_shr = voice[2];
-					//gain_shr = voice[2] ? 2 : 1;
-					gain_shr = voice[2] ? 2 : 0;
+					gain_shr = voice[2] ? 2 : 1;
+					//gain_shr = voice[2] ? 2 : 0;
 
 					note_on = mel_note_on;
 					note_src = 0;
@@ -813,8 +867,13 @@ module music_player #(
 			end
 			// bass
 			2: begin
+				instrument = 2;
 				voice_on = bass_on;
-				nshift = 5;
+				//nshift = 5;
+				//if (bass_soft) nshift = t_int[1] ? 4 : 3;
+				if (bass_soft) nshift = 4;
+				else nshift = t_int[1] ? 7 : 5;
+
 				saw = 1;
 				delta_mul = voice[1:0];
 				gain_shr = 0; //(delta_mul == 0 || delta_mul == 3); // reduce the volume a bit to avoid saturation for now
@@ -831,11 +890,14 @@ module music_player #(
 				//note7 = root_note;
 				//oct0 = 0;
 				// TODO: note_start/note_stop?
+				note_start = bass_soft;
 				note_stop_slow = bass_note_stop_slow;
+				note_stop = 1;
 			end
 
 			// arpeggio
 			3: begin
+				instrument = 3;
 				voice_on = arp_on;
 				nshift = 2;
 				delta_mul = voice[1:0];
@@ -846,11 +908,16 @@ module music_player #(
 				note_start = 1;
 				note_stop = !arp_stop_slow;
 				note_stop_slow = arp_stop_slow;
+				if (arpy_stop_slow) begin
+					note_stop = 0;
+					note_stop_slow = 1;
+				end
 				note_src = 2;
 			end
 
 			// chords
 			4, 5, 6, 7: begin
+				instrument = 4;
 				delta_note_from_chord_en = 1;
 				delta_note_from_chord_index = voice[2:1];
 
@@ -875,7 +942,7 @@ module music_player #(
 				end
 
 				//if (chords_stutter_en) nshift = t34_int[1] ? 2 : 4;
-				if (chords_stutter_en) nshift = 3;
+				//if (chords_stutter_en) nshift = 3;
 
 				note_on = 1;
 				note_src = 1;
@@ -902,15 +969,15 @@ module music_player #(
 				*/
 				
 				if (chords_stutter_en && !note_stop) begin
-					note_start |= !t34_int[1]; note_stop_slow |= t34_int[1];
-					//note_start |= !t_int[1]; note_stop_slow |= t_int[1];
+					//note_start |= !t34_int[1]; note_stop_slow |= t34_int[1];
+					note_start |= !t_int[1]; note_stop_slow |= t_int[1];
 				end
 				/*
 				if (chords_stutter_en && !note_stop && !note_start) begin
 					note_start |= 1; note_stop_slow |= 1;
 				end
 				*/
-				if (pattern == 3) begin
+				if (pattern == 3 || force_pattern3) begin
 					if (pattern_index0 == 48) note_on = 0;
 					if (pattern_index0 == 50) note_start = 1;
 				end
@@ -969,15 +1036,11 @@ module music_player #(
 			end
 		end
 
+		if (force_stay_at_end) note_start = 0;
+
 		//if (voice < 20) voice_on = 0;
 		//if (voice >= 12 && voice < 20) voice_on = 0;
 	end
-
-	wire [2:0] arpy_note;
-	arpy arpy_inst(
-		.t_in(t_int[3:1]), .root_note(root_note), .sus4(sus4),
-		.note(arpy_note)
-	);
 
 	logic [2:0] note7_0;
 	always_comb begin
@@ -1023,7 +1086,7 @@ module music_player #(
 	wire delta_oct3;
 `ifdef USE_SCALES
 	multiplier_lookup mul_lookup(
-		.note7(note7), .scale(scale),
+		.note7(note7), .scale(scale), .nonharmonic(nonharmonic),
 		.multiplier(multiplier0), .delta_oct(delta_oct3)
 	);
 `else
@@ -1081,16 +1144,24 @@ module music_player #(
 	synth_scheduler #(.OUT_ACC_BITS(OUT_ACC_BITS), .OCT_BITS(OCT_BITS), .STATE_BITS(STATE_BITS), .DELTA_SIGMA_BITS(DELTA_SIGMA_BITS)) sched(
 		.clk(clk), .reset(reset), .en(en),
 
-		.note_on(note_on && voice_on),
+		.note_on(note_on && voice_on && !((note_stop || note_stop_slow) && t_34_overflow)),
 		//.first_voice(voice == 0),
 		.first_voice(first_voice),
 		.state(state),
 		.src2_note_mul(multiplier), .src2_pwm_offs(pwm_offs), .src2_vol(vol), .src2_slope_frac(slope_frac), .out_acc_initial(out_acc_initial),
 		.oct(oct), .nshift(nshift), .gain_shr(gain_shr), .saw(saw),
 
+		.bdrum_phase('X), .bdrum_en(0), .force_no_b_delay(0),
+
 		.override_en(0), .override_src2_sel('X), .override_wes('X),
 
 		.out_acc_out(out_acc)
 	);
 
+	assign t34_int_out = t34_int;
+	assign note_on_out = note_on && voice_on;
+	assign multiplier_out = multiplier;
+	assign oct_out = oct;
+	assign gain_shr_out = gain_shr;
+	assign vol_out = vol;
 endmodule : music_player

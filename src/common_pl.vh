@@ -10,6 +10,7 @@
 
 `define USE_MUSIC
 `define USE_SCALES
+//`define USE_BDRUM
 
 `define USE_TUNNEL
 
@@ -21,6 +22,7 @@
 
 
 `ifdef USE_CURR_X_FIX_BITS
+	`define CURR_ROOM_FIX_MASK 'b100001111
 	`ifdef USE_TUNNEL
 		`define CURR_X_E0_FIX_MASK 63
 		`define CURR_X_E1_FIX_MASK 63
@@ -29,10 +31,12 @@
 		`define CURR_X_E1_FIX_MASK (-1)
 	`endif
 `else
+	`define CURR_ROOM_FIX_MASK 0
 	`define CURR_X_E0_FIX_MASK 0
 	`define CURR_X_E1_FIX_MASK 0
 `endif
 
+`define CURR_ROOM_FIX_VALUE 4
 `define CURR_X_E0_FIX_VALUE 0
 `define CURR_X_E1_FIX_VALUE ((-128+16)*2)
 
