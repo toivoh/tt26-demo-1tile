@@ -19,12 +19,12 @@ project:
   source_files:
     - "project_synth.v"
 
+    - "synth_test.sv"
     - "music_player_wrapper.sv"
-    - "raster_scan.sv"
-    - "memories.sv"
     - "music_player.sv"
     - "vga_skeleton.sv"
-    - "synth_test.sv"
+    - "raster_scan.sv"
+    - "memories.sv"
 
 # The pinout of your project. Leave unused pins blank. DO NOT delete or add any pins.
 # This section is for the datasheet/website. Use descriptive names (e.g., RX, TX, MOSI, SCL, SEG_A, etc.).
