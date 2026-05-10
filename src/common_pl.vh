@@ -12,6 +12,8 @@
 `define USE_SCALES
 //`define USE_BDRUM
 
+//`define DUPLICATE_SYNTH
+
 `define USE_TUNNEL
 
 `define USE_CURR_X_FIX_BITS

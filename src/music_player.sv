@@ -385,6 +385,7 @@ module music_player #(
 		OUT_ACC_BITS = 15,
 		MULTIPLIER_ADDITION_BITS = 3,
 		DELTA_SIGMA_BITS = 4,
+		GPHASE_IN_BITS = 19,
 
 		// Don't change
 		T_BITS = T_INT_BITS + T_FRAC_BITS
@@ -398,7 +399,14 @@ module music_player #(
 
 		input wire [OUT_ACC_BITS-1:0] out_acc_initial,
 
+		input wire skip_out_acc_update,
+		input wire gphase_override,
+		input wire [GPHASE_IN_BITS-1:0] gphase_in,
+
 		output wire [OUT_ACC_BITS-1:0] out_acc,
+
+		output wire new_voice_sample, new_voice_sample_pregain,
+		output wire signed [ACC_BITS-1:0] acc,
 
 		output wire [T_INT_BITS-1:0] t34_int_out,
 		output int instrument,
@@ -1082,25 +1090,43 @@ module music_player #(
 	logic [1:0] delta_mul = {voice[0], voice[1]};
 	logic [OCT_BITS-1:0] delta_oct = voice[1];
 */
-	wire [9:0] multiplier0;
+	wire [9:0] multiplier0, multiplier00;
 	wire delta_oct3;
 `ifdef USE_SCALES
 	multiplier_lookup mul_lookup(
 		.note7(note7), .scale(scale), .nonharmonic(nonharmonic),
-		.multiplier(multiplier0), .delta_oct(delta_oct3)
+		.multiplier(multiplier00), .delta_oct(delta_oct3)
 	);
 `else
 	multiplier_table7 mul_table7(
 		.note7(note7),
-		.multiplier(multiplier0)
+		.multiplier(multiplier00)
 	);
 	assign delta_oct3 = 0;
 `endif
 
+
+	wire signed [5:0] factor_b_index;
+
+	logic mul0_override, delta_mul_override;
+	always_comb begin
+		mul0_override = 0;
+		delta_mul_override = 0;
+		if (gphase_override) begin
+			//if (factor_b_index[4:1] > 4) mul0_override = 1;
+			if (factor_b_index[4:1] > 5) mul0_override = 1;
+			//if (factor_b_index[4:1] > 6) mul0_override = 1;
+		end
+	end
+
+
+	assign multiplier0 = mul0_override ? 1 : multiplier00;
+	wire [1:0] delta_mul_eff = delta_mul_override ? 1 : delta_mul;
+
 	wire [1:0] delta_oct23 = delta_oct2 + (delta_oct3|root_high) + delta_oct4; // delta_oct3 = 1 only for Ab when scale != 0. TODO: shouldn't coincide with root_high?
 	wire [OCT_BITS-1:0] oct = oct0 + delta_oct + delta_oct23;
 
-	wire [9:0] multiplier1 = multiplier0 + delta_mul;
+	wire [9:0] multiplier1 = multiplier0 + delta_mul_eff;
 	logic [9:0] multiplier;
 	always_comb begin
 		multiplier = multiplier0;
@@ -1141,10 +1167,12 @@ module music_player #(
 		//if (!(note_on && voice_on)) vol = 0;
 	end
 
+	wire note_on_eff = note_on && voice_on && !((note_stop || note_stop_slow) && t_34_overflow);
+	wire [ACC_BITS-1:0] src1_out, src2_out;
 	synth_scheduler #(.OUT_ACC_BITS(OUT_ACC_BITS), .OCT_BITS(OCT_BITS), .STATE_BITS(STATE_BITS), .DELTA_SIGMA_BITS(DELTA_SIGMA_BITS)) sched(
 		.clk(clk), .reset(reset), .en(en),
 
-		.note_on(note_on && voice_on && !((note_stop || note_stop_slow) && t_34_overflow)),
+		.note_on(note_on_eff),
 		//.first_voice(voice == 0),
 		.first_voice(first_voice),
 		.state(state),
@@ -1155,8 +1183,43 @@ module music_player #(
 
 		.override_en(0), .override_src2_sel('X), .override_wes('X),
 
-		.out_acc_out(out_acc)
+		.out_acc_out(out_acc),
+
+`ifndef DUPLICATE_SYNTH
+		.new_voice_sample(new_voice_sample), .new_voice_sample_pregain(new_voice_sample_pregain),
+		.acc_out(acc),
+`endif
+
+		.skip_out_acc_update(skip_out_acc_update),
+		.gphase_in(gphase_in), .gphase_override(gphase_override),
+
+		.src1_in('X), .src2_in('X),
+		.src1_out(src1_out), .src2_out(src2_out),
+		.factor_b_index_out(factor_b_index)
 	);
+
+`ifdef DUPLICATE_SYNTH
+	synth_scheduler #(.OUT_ACC_BITS(OUT_ACC_BITS), .OCT_BITS(OCT_BITS), .STATE_BITS(STATE_BITS), .DELTA_SIGMA_BITS(DELTA_SIGMA_BITS), .REDUCED(1)) sched_reduced(
+		.clk(clk), .reset(reset), .en(en),
+
+		.note_on(note_on_eff),
+		//.first_voice(voice == 0),
+		.first_voice(first_voice),
+		.state(state),
+		.src2_note_mul(multiplier), .src2_pwm_offs(pwm_offs), .src2_vol(vol), .src2_slope_frac(slope_frac), .out_acc_initial(out_acc_initial),
+		.oct(oct), .nshift(nshift), .gain_shr(gain_shr), .saw(saw),
+
+		.bdrum_phase('X), .bdrum_en(0), .force_no_b_delay(0),
+
+		.override_en(0), .override_src2_sel('X), .override_wes('X),
+
+		.src1_in(src1_out), .src2_in(src2_out), .gphase_in(gphase_in),
+
+		.new_voice_sample(new_voice_sample), .new_voice_sample_pregain(new_voice_sample_pregain),
+		.acc_out(acc)
+	);
+`endif
+
 
 	assign t34_int_out = t34_int;
 	assign note_on_out = note_on && voice_on;

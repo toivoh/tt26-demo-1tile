@@ -10,6 +10,7 @@ module synth_alu #(
 		parameter FACTOR_A_BITS = 10,
 		GPHASE_BITS = 19, OUT_ACC_BITS = 15,
 		DELTA_SIGMA_BITS = 4,
+		REDUCED = 0,
 		// Don't change:
 		ACC_BITS = FACTOR_A_BITS // Must be even and >= FACTOR_A_BITS
 	) (
@@ -35,7 +36,9 @@ module synth_alu #(
 		output wire signed [ACC_BITS-1:0] acc_out,
 		output wire signed [OUT_ACC_BITS-1:0] out_acc_out,
 
-		output wire [ACC_BITS-1:0] src2_out,
+		input wire [ACC_BITS-1:0] src1_in, src2_in,
+
+		output wire [ACC_BITS-1:0] src1_out, src2_out,
 		output wire booth_carry_out,
 		output wire [ACC_BITS-1:0] result_out
 	);
@@ -108,7 +111,7 @@ module synth_alu #(
 
 	logic signed [ACC_BITS-1:0] acc_in;
 	logic [SRC2_BITS-1:0] src2;
-	always_comb begin
+	always_comb if (!REDUCED) begin
 		acc_in = 'X;
 		case (src1_sel)
 			`SRC1_ZERO:     acc_in = '0;
@@ -125,16 +128,16 @@ module synth_alu #(
 			`SRC2_PWM_OFFS:     src2 = {src2_pwm_offs[ACC_BITS-1], src2_pwm_offs}; // sign extend. TODO: needed in more places?
 			`SRC2_VOL:          src2 = src2_vol;
 			`SRC2_SLOPE_FRAC:   src2 = src2_slope_frac >> 1;
-			`SRC2_GPHASE_LOW:   src2 = gphase_low;
-			`SRC2_GPHASE_HIGH:  src2 = gphase_high;
+			`SRC2_GPHASE_LOW:   if (!REDUCED) src2 = gphase_low;
+			`SRC2_GPHASE_HIGH:  if (!REDUCED) src2 = gphase_high;
 
-			`SRC2_OUT_ACC_LOW:  src2 = out_acc_low;
-			`SRC2_OUT_ACC_LOW0: begin
+			`SRC2_OUT_ACC_LOW:  if (!REDUCED) src2 = out_acc_low;
+			`SRC2_OUT_ACC_LOW0: if (!REDUCED) begin
 				src2 = out_acc_initial[ACC_BITS-1:0];
 				if (DELTA_SIGMA_BITS > 0) src2[DELTA_SIGMA_BITS-1:0] = out_acc_low[DELTA_SIGMA_BITS-1:0];
 			end
-			`SRC2_OUT_ACC_HIGH: src2 = out_acc_high;
-			`SRC2_OUT_ACC_HIGH0:src2 = out_acc_initial[OUT_ACC_BITS-1:ACC_BITS];
+			`SRC2_OUT_ACC_HIGH: if (!REDUCED) src2 = out_acc_high;
+			`SRC2_OUT_ACC_HIGH0:if (!REDUCED) src2 = out_acc_initial[OUT_ACC_BITS-1:ACC_BITS];
 
 			`SRC2_ACC_SHL1:     src2 = acc << 1;
 `ifdef USE_BDRUM
@@ -143,7 +146,15 @@ module synth_alu #(
 			default:            src2 = 'X;
 		endcase
 		if (src2_zero) src2 = '0;
+	end else begin // REDUCED
+		acc_in = src1_in;
+		if (src1_sel == `SRC1_ACC) acc_in = acc;
+
+		src2 = src2_in;
+		if (src2_sel == `SRC2_ACC_SHL1 && !src2_zero) src2 = acc << 1;
 	end
+
+	assign src1_out = acc_in;
 	assign src2_out = src2;
 
 
@@ -211,6 +222,7 @@ module synth_scheduler  #(
 		GPHASE_BITS = 19, OUT_ACC_BITS = 15,
 		OCT_BITS = 3, NSHIFT_BITS = 3,
 		DELTA_SIGMA_BITS = 4,
+		REDUCED = 0,
 		// Don't change:
 		ACC_BITS = FACTOR_A_BITS, // Must be even and >= FACTOR_A_BITS
 		BDRUM_PHASE_BITS = 13,
@@ -234,11 +246,19 @@ module synth_scheduler  #(
 		input wire [`SRC2_BITS-1:0] override_src2_sel,
 		input wire [`WE_BITS-1:0] override_wes,
 
+		input wire skip_out_acc_update,
+		input wire gphase_override,
+		input wire [GPHASE_BITS-1:0] gphase_in,
+
+		output wire new_voice_sample, new_voice_sample_pregain,
 		output wire signed [ACC_BITS-1:0] acc_out,
 		output wire signed [OUT_ACC_BITS-1:0] out_acc_out,
 
-		output wire [ACC_BITS-1:0] src2_out,
-		output wire booth_carry_out
+		input wire [ACC_BITS-1:0] src1_in, src2_in,
+		output wire [ACC_BITS-1:0] src1_out, src2_out,
+
+		output wire booth_carry_out,
+		output wire signed [5:0] factor_b_index_out
 	);
 
 	// Add one sign bit
@@ -293,7 +313,8 @@ module synth_scheduler  #(
 	localparam STATE_GPHASE2 = 33;
 
 
-	wire [GPHASE_BITS-1:0] gphase;
+	wire [GPHASE_BITS-1:0] gphase_internal;
+	wire [GPHASE_BITS-1:0] gphase = REDUCED || gphase_override ? gphase_in : gphase_internal;
 
 
 	logic [`SRC1_BITS-1:0] src1_sel;
@@ -440,7 +461,7 @@ module synth_scheduler  #(
 					src2_sel = first_voice ? `SRC2_OUT_ACC_LOW0 : `SRC2_OUT_ACC_LOW;
 					//src2_mod[`SRC2MOD_BIT_ZERO] = first_voice;
 					wes[`WE_BIT_ACC] = 1;
-					wes[`WE_BIT_OUT_ACC_LOW] = 1;
+					wes[`WE_BIT_OUT_ACC_LOW] = !skip_out_acc_update;
 				end
 				STATE_OUT_ACC2: begin
 					src1_sel = last_sign ? `SRC1_MINUS1 : `SRC1_ZERO;
@@ -450,7 +471,7 @@ module synth_scheduler  #(
 					src2_mod[`SRC2MOD_BIT_CARRY_IN] = booth_carry_out;
 					//src2_mod[`SRC2MOD_BIT_ZERO] = first_voice;
 					wes[`WE_BIT_ACC] = 1;
-					wes[`WE_BIT_OUT_ACC_HIGH] = 1;
+					wes[`WE_BIT_OUT_ACC_HIGH] = !skip_out_acc_update;
 				end
 
 				STATE_GPHASE1: begin
@@ -553,8 +574,8 @@ module synth_scheduler  #(
 	end
 
 
-	wire [ACC_BITS-1:0] result;
-	synth_alu #(.FACTOR_A_BITS(FACTOR_A_BITS), .GPHASE_BITS(GPHASE_BITS), .OUT_ACC_BITS(OUT_ACC_BITS), .DELTA_SIGMA_BITS(DELTA_SIGMA_BITS)) alu(
+	wire [ACC_BITS-1:0] result, acc;
+	synth_alu #(.FACTOR_A_BITS(FACTOR_A_BITS), .GPHASE_BITS(GPHASE_BITS), .OUT_ACC_BITS(OUT_ACC_BITS), .DELTA_SIGMA_BITS(DELTA_SIGMA_BITS), .REDUCED(REDUCED)) alu(
 		.clk(clk), .reset(reset), .en(en_eff),
 
 		.src2_note_mul(src2_note_mul), .src2_pwm_offs(src2_pwm_offs), .src2_vol(src2_vol), .src2_slope_frac(src2_slope_frac),
@@ -565,8 +586,17 @@ module synth_scheduler  #(
 		.add_mask(add_mask),
 		.final_factor_b(0), .first_factor_b(first_factor_b), .factor_b(factor_b_bits),
 
-		.gphase_out(gphase), .acc_out(acc_out), .src2_out(src2_out), .booth_carry_out(booth_carry_out), .result_out(result), .out_acc_out(out_acc_out)
+		.src1_in(src1_in), .src2_in(src2_in),
+		.src1_out(src1_out), .src2_out(src2_out),
+		.gphase_out(gphase_internal), .acc_out(acc), .booth_carry_out(booth_carry_out), .result_out(result), .out_acc_out(out_acc_out)
 	);
+
+
+	assign acc_out = note_on ? acc : 0;
+	assign new_voice_sample = (state == STATE_OUT_ACC1);
+	assign new_voice_sample_pregain = (state == STATE_GAIN_SHR1);
+
+	assign factor_b_index_out = factor_b_index;
 
 
 	reg [ACC_BITS-1:0] debug_phase, debug_tri1, debug_tri2;
@@ -635,6 +665,4 @@ module booth_multiplier #(
 			carry <= next_carry;
 		end
 	end
-
-	assign acc_out = acc;
 endmodule : booth_multiplier
