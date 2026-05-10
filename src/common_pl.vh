@@ -12,6 +12,7 @@
 `define USE_SCALES
 //`define USE_BDRUM
 `define USE_WF_PWM
+`define USE_T_FOR_PWM // use for 1-tile demo, not 4-tile demo (needed for visualization of PWM)
 
 //`define DUPLICATE_SYNTH
 

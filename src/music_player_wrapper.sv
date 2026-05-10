@@ -39,6 +39,10 @@ module music_player_wrapper #(
 		input wire gphase_override,
 		input wire [GPHASE_IN_BITS-1:0] gphase_in,
 
+		input wire scale_override_en,
+		input wire [2:0] scale_override,
+		input wire nonharmonic_override,
+
 		output logic [4:0] voice,
 		output wire [T_BITS+T_FRAC_BITS-1:0] t,
 
@@ -121,6 +125,7 @@ module music_player_wrapper #(
 		.t(t), .first_voice(voice==0), .voice(voice), .state(state),
 		.out_acc_initial(out_acc_initial),
 		.skip_out_acc_update(skip_out_acc_update), .gphase_in(gphase_in), .gphase_override(gphase_override),
+		.scale_override_en(scale_override_en), .scale_override(scale_override), .nonharmonic_override(nonharmonic_override),
 
 		.out_acc(out_acc),
 

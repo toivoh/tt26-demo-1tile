@@ -6,6 +6,12 @@
 `default_nettype none
 `include "common_pl.vh"
 
+`define USE_T_FOR_PWM
+
+`ifndef PURE_RTL
+//`define USE_LATCHES
+`endif
+
 // for vga_skeleton
 module tt_um_toivoh_demo_1tile #(
 		`propagated_parameters_standard,
@@ -34,8 +40,10 @@ module tt_um_toivoh_demo_1tile #(
 	wire pwm_out;
 	vga_skeleton #( `parameters_forward ) vtracer(
 		.clk(clk), .reset(reset),
-		.speedup(ui_in[2:0]),
-		.force_x_at_thresh(ui_in[6]), .force_y_at_thresh(ui_in[7]),
+		.speedup(ui_in[2:0]), .use_full_sample_rate(ui_in[3]),
+		.scale_override_choice(ui_in[6:4]),
+		//.force_x_at_thresh(ui_in[6]), .force_y_at_thresh(ui_in[7]),
+		.force_x_at_thresh(0), .force_y_at_thresh(ui_in[7]),
 		.rgb_out(rgb), .hsync(hsync), .vsync(vsync),
 		.sound_sample(sound_sample), .pwm_out(pwm_out)
 	);

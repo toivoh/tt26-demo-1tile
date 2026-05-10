@@ -403,6 +403,10 @@ module music_player #(
 		input wire gphase_override,
 		input wire [GPHASE_IN_BITS-1:0] gphase_in,
 
+		input wire scale_override_en,
+		input wire [2:0] scale_override,
+		input wire nonharmonic_override,
+
 		output wire [OUT_ACC_BITS-1:0] out_acc,
 
 		output wire new_voice_sample, new_voice_sample_pregain,
@@ -621,6 +625,11 @@ module music_player #(
 		//echo_on = 0;
 		time_echo_on = echo_on;
 
+		if (scale_override_en) begin
+			scale = scale_override;
+			nonharmonic = nonharmonic_override;
+		end
+
 /*
 		en_34 = 0; melody_on = 0; echo_on = 0; bass_on = 0; chords_on = 0; arp_on = 0;
 		scale = 0;
@@ -790,9 +799,13 @@ module music_player #(
 	wire [4:0] voice_case = voice | (organ_chords_en ? (voice[3] << 4): 0);
 //	wire [4:0] voice_case = voice | (organ_chords_en ? {{2{!voice[4]}}, 3'b000}: 0);
 
-//	wire [ACC_BITS-1:0] pwm_offs_t = gphase >> 3;
-	wire [ACC_BITS-1:0] pwm_offs_t = gphase >> 4;
-//	wire [ACC_BITS-1:0] pwm_offs_t = gphase >> 5;
+	localparam PWM_RSHIFT = 4;
+
+`ifdef USE_T_FOR_PWM
+	wire [ACC_BITS-1:0] pwm_offs_t = t >> PWM_RSHIFT;
+`else
+	wire [ACC_BITS-1:0] pwm_offs_t = gphase >> PWM_RSHIFT;
+`endif
 
 	//int temp1, temp2;
 	always_comb begin

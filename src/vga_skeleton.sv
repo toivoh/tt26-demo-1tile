@@ -6,10 +6,19 @@
 `default_nettype none
 `include "common_pl.vh"
 
+`ifdef PURE_RTL
+`define INITIAL_FRAME_T 0
+//`define INITIAL_FRAME_T (5*256*8)
+`else
+`define INITIAL_FRAME_T 0
+`endif
+
 module vga_skeleton #( `propagated_parameter_definitions, `derived_parameter_definitions ) (
 		input wire clk, reset,
 
 		input wire [2:0] speedup,
+		input wire use_full_sample_rate,
+		input wire [2:0] scale_override_choice,
 
 		input wire force_x_at_thresh, force_y_at_thresh,
 
@@ -70,7 +79,7 @@ module vga_skeleton #( `propagated_parameter_definitions, `derived_parameter_def
 	reg signed [T_BITS-1:0] frame_t;
 
 	always_ff @(posedge clk) begin
-		if (reset) frame_t <= '0;
+		if (reset) frame_t <= `INITIAL_FRAME_T;
 		else frame_t <= frame_t + new_frame;
 	end
 
@@ -91,6 +100,8 @@ module vga_skeleton #( `propagated_parameter_definitions, `derived_parameter_def
 			default: begin; dy_en = 'X; dy_2x = 'X; dy_inv = 'X; end
 		endcase
 
+		dy_inv = !dy_inv;
+
 		delta_y = t_dy;
 		if (dy_inv) delta_y = (~delta_y)&511;
 		if (dy_2x) delta_y = delta_y << 1;
@@ -99,18 +110,38 @@ module vga_skeleton #( `propagated_parameter_definitions, `derived_parameter_def
 
 	wire [10:0] y_eff = y + delta_y;
 
+
+	logic scale_override_en;
+	logic [2:0] scale_override;
+	logic nonharmonic_override;
+	always_comb begin
+		scale_override_en = (scale_override_choice != 0);
+
+		scale_override = scale_override_choice;
+		nonharmonic_override = 0;
+		if (scale_override_choice[2] == 0) begin
+			scale_override[1:0] = '0;
+			if (scale_override_choice[1]) begin
+				nonharmonic_override = 1;
+				scale_override = 4;
+			end
+		end
+	end
+
+
 	wire new_voice_sample, new_voice_sample_pregain;
 	wire signed [ACC_BITS-1:0] acc;
 	wire odd_sample;
 	//wire gphase_override = 0;
 	wire gphase_override = odd_sample;
+	wire gphase_override_eff = gphase_override && !use_full_sample_rate;
 	wire [4:0] voice;
 	music_player_wrapper mplayer(
 		.clk(clk), .reset(reset),
 
 		.speedup(speedup),
 		.x0(x0), .y_in(full_y), .frame_t(frame_t),
-		.skip_out_acc_update(gphase_override), .gphase_override(gphase_override),
+		.skip_out_acc_update(gphase_override_eff), .gphase_override(gphase_override_eff),
 //		.gphase_in({y[8:0], 1'b0}),
 		.gphase_in({y_eff, 1'b0}),
 //		.gphase_in({frame_t, 1'b0, y[8:0]}),
@@ -118,6 +149,8 @@ module vga_skeleton #( `propagated_parameter_definitions, `derived_parameter_def
 //		.gphase_in({frame_t[T_BITS-1:2], 2'b0, y[8:0], 1'b0}),
 //		.gphase_in({frame_t[T_BITS-1:0], 2'b0, y[8:0], 1'b0}),
 //		.gphase_in({frame_t[T_BITS-1:0], 3'b0, y[8:0], 1'b0}),
+		.scale_override_en(scale_override_en), .scale_override(scale_override), .nonharmonic_override(nonharmonic_override),
+
 		.voice(voice),
 		.out_acc(sound_sample), .pwm_out(pwm_out),
 		.odd_sample(odd_sample),
@@ -232,7 +265,7 @@ module vga_skeleton #( `propagated_parameter_definitions, `derived_parameter_def
 			endcase
 			default: rgb_out = 'X;
 		endcase
-		if (!vpwm_level || !active) rgb_out = 0;
+		if (!vpwm_level || !active || (voice == 0)) rgb_out = 0;
 	end
 
 /*
