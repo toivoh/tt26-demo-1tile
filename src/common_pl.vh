@@ -47,7 +47,7 @@
 
 
 `ifndef PURE_RTL
-//`define USE_LATCHES
+`define USE_LATCHES
 `endif
 
 
