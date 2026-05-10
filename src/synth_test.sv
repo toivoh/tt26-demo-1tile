@@ -125,7 +125,11 @@ module synth_alu #(
 		src2 = 'X;
 		case (src2_sel)
 			`SRC2_NOTE_MUL:     src2 = src2_note_mul;
+`ifdef USE_WF_PWM
+			`SRC2_PWM_OFFS:     src2 = {!src2_mod[`SRC2MOD_BIT_NEG], src2_pwm_offs}; // sign extend. TODO: needed in more places?
+`else
 			`SRC2_PWM_OFFS:     src2 = {src2_pwm_offs[ACC_BITS-1], src2_pwm_offs}; // sign extend. TODO: needed in more places?
+`endif
 			`SRC2_VOL:          src2 = src2_vol;
 			`SRC2_SLOPE_FRAC:   src2 = src2_slope_frac >> 1;
 			`SRC2_GPHASE_LOW:   if (!REDUCED) src2 = gphase_low;
@@ -238,7 +242,7 @@ module synth_scheduler  #(
 		input wire [ACC_BITS-1:0] src2_note_mul, src2_pwm_offs, src2_vol, src2_slope_frac,
 		input wire [BDRUM_PHASE_BITS-1:0] bdrum_phase,
 		input wire [OCT_BITS-1:0] oct,
-		input wire saw, bdrum_en, force_no_b_delay,
+		input wire saw, bdrum_en, force_no_b_delay, neg_pwm_offs,
 		input wire [NSHIFT_BITS-1:0] nshift,
 		input wire [`GAIN_SHR_BITS-1:0] gain_shr,
 
@@ -258,7 +262,8 @@ module synth_scheduler  #(
 		output wire [ACC_BITS-1:0] src1_out, src2_out,
 
 		output wire booth_carry_out,
-		output wire signed [5:0] factor_b_index_out
+		output wire signed [5:0] factor_b_index_out,
+		output wire [GPHASE_BITS-1:0] gphase_out
 	);
 
 	// Add one sign bit
@@ -395,6 +400,9 @@ module synth_scheduler  #(
 					flags[`FLAG_ZEXT_ACC] = 1;
 					src2_sel = `SRC2_PWM_OFFS;
 					src2_mod[`SRC2MOD_BIT_SEXT] = 1;
+					src2_mod[`SRC2MOD_BIT_NEG] = neg_pwm_offs;
+					src2_mod[`SRC2MOD_BIT_CARRY_IN_CONTROL] = 1;
+					src2_mod[`SRC2MOD_BIT_CARRY_IN] = 0;
 					flags[`FLAG_BIT_SATURATE] = 1;
 					wes[`WE_BIT_ACC] = 1;
 				end
@@ -597,6 +605,7 @@ module synth_scheduler  #(
 	assign new_voice_sample_pregain = (state == STATE_GAIN_SHR1);
 
 	assign factor_b_index_out = factor_b_index;
+	assign gphase_out = gphase; //gphase_internal;
 
 
 	reg [ACC_BITS-1:0] debug_phase, debug_tri1, debug_tri2;

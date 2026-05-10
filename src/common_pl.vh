@@ -11,6 +11,7 @@
 `define USE_MUSIC
 `define USE_SCALES
 //`define USE_BDRUM
+`define USE_WF_PWM
 
 //`define DUPLICATE_SYNTH
 

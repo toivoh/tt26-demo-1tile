@@ -428,6 +428,7 @@ module music_player #(
 
 	localparam BASS_OCT = BASE_OCT;
 
+	wire [GPHASE_IN_BITS-1:0] gphase;
 
 	wire melody_voice = (voice[VOICE_BITS-1:3] == 0);
 	wire chords_voice = (voice[VOICE_BITS-1:3] == 2);
@@ -452,7 +453,7 @@ module music_player #(
 	logic [2:0] scale;
 	logic nonharmonic;
 	logic arp_high, arp_stop_slow;
-	logic keys_en, organ_chords_en, melody_saw_en;
+	logic keys_en, organ_chords_en, melody_saw_en, pwm_en;
 	logic lower_end;
 	logic force_pattern3, force_stay_at_end;
 	logic chords_snh_en, chords_loud, chords_stutter_en;
@@ -464,7 +465,7 @@ module music_player #(
 		scale = 0;
 		nonharmonic = 0;
 		arp_stop_slow = 0; arp_high = 0;
-		keys_en = 0; melody_saw_en = 0;
+		keys_en = 0; melody_saw_en = 0; pwm_en = 0;
 		organ_chords_en = 0;
 		chords_stutter_en = 0;
 		lower_end = 0;
@@ -489,7 +490,7 @@ module music_player #(
 				melody_on = 1; echo_on = 1; bass_on = 0; chords_on = 0; arp_on = 0;
 				chords_on = 1; // TODO: Do I want this?
 				if (part[2]) begin
-					melody_saw_en = 1;
+					melody_saw_en = 1; pwm_en = 1;
 					lower_end = 1;
 					chords_on = 1;
 					force_pattern3 = 1;
@@ -556,6 +557,7 @@ module music_player #(
 				//end else if (pattern == 0) begin
 				//end else if (pattern[0] == 0) begin
 				end else begin
+					//pwm_en = 1;
 					bass_on = (pattern != 0);
 					//chords_on = (pattern != 2);
 					chords_on = (pattern != 1) || (measure == 0);
@@ -581,7 +583,7 @@ module music_player #(
 			2: begin
 				// 4/4 melody
 				scale = 0;
-				melody_saw_en = 1;
+				melody_saw_en = 1; pwm_en = 1;
 				melody_on = 1; echo_on = 1; bass_on = 1; chords_on = 1; arp_on = 0;
 
 				if (final_measure && !melody_voice) scale = 4;
@@ -600,6 +602,7 @@ module music_player #(
 			5: begin
 				// everything
 				scale = 0;
+				pwm_en = 1;
 				melody_on = 1; echo_on = 1; bass_on = 1; chords_on = 1; arp_on = 1;
 				arp_high = 1; arp_stop_slow = 1;
 				chords_snh_en = 1;
@@ -767,10 +770,10 @@ module music_player #(
 	logic [OCT_BITS-1:0] delta_oct;
 	logic delta_oct4;
 	logic note_start, note_stop, note_stop_slow;
-	logic saw;
+	logic saw, neg_pwm_offs;
 	logic [NSHIFT_BITS-1:0] nshift;
 	logic [ACC_BITS-1:0] slope_frac; // LSB is not used
-	logic signed [ACC_BITS-1:0] pwm_offs; // LSB is not used
+	logic signed [ACC_BITS-1:0] pwm_offs;
 	logic [1:0] gain_shr;
 
 	logic [1:0] note_src;
@@ -785,6 +788,10 @@ module music_player #(
 
 	wire [4:0] voice_case = voice | (organ_chords_en ? (voice[3] << 4): 0);
 //	wire [4:0] voice_case = voice | (organ_chords_en ? {{2{!voice[4]}}, 3'b000}: 0);
+
+//	wire [ACC_BITS-1:0] pwm_offs_t = gphase >> 3;
+	wire [ACC_BITS-1:0] pwm_offs_t = gphase >> 4;
+//	wire [ACC_BITS-1:0] pwm_offs_t = gphase >> 5;
 
 	//int temp1, temp2;
 	always_comb begin
@@ -804,6 +811,7 @@ module music_player #(
 
 		nshift = 'X;
 		saw = 0;
+		neg_pwm_offs = 0;
 		gain_shr = 0;
 
 		note_src = 0;
@@ -848,6 +856,12 @@ module music_player #(
 						saw = 1;
 						nshift = 4;
 					end
+`ifdef USE_WF_PWM
+					if (pwm_en) begin
+						pwm_offs = pwm_offs_t[8:0] + 256;
+						neg_pwm_offs = pwm_offs_t[9];
+					end
+`endif
 				end else begin
 					instrument = 1;
 					// Keys
@@ -1177,7 +1191,7 @@ module music_player #(
 		.first_voice(first_voice),
 		.state(state),
 		.src2_note_mul(multiplier), .src2_pwm_offs(pwm_offs), .src2_vol(vol), .src2_slope_frac(slope_frac), .out_acc_initial(out_acc_initial),
-		.oct(oct), .nshift(nshift), .gain_shr(gain_shr), .saw(saw),
+		.oct(oct), .nshift(nshift), .gain_shr(gain_shr), .saw(saw), .neg_pwm_offs(neg_pwm_offs),
 
 		.bdrum_phase('X), .bdrum_en(0), .force_no_b_delay(0),
 
@@ -1195,7 +1209,8 @@ module music_player #(
 
 		.src1_in('X), .src2_in('X),
 		.src1_out(src1_out), .src2_out(src2_out),
-		.factor_b_index_out(factor_b_index)
+		.factor_b_index_out(factor_b_index),
+		.gphase_out(gphase)
 	);
 
 `ifdef DUPLICATE_SYNTH
