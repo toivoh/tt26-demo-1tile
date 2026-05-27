@@ -1,6 +1,6 @@
 # Tiny Tapeout project information
 project:
-  title:        "Single tile demo [TTSKY26a demo competition]"      # Project title
+  title:        "Underflow Uncubed [TTSKY26a demo competition]"      # Project title
   author:       "Toivo Henningsson"      # Your name
   discord:      "possible_realities"      # Your discord username, for communication and automatically assigning you a Tapeout role (optional)
   description:  "Single tile demo for to the TTSKY26a demo competition"      # One line description of what your project does
